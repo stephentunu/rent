@@ -1,0 +1,24 @@
+Dear Safaricom Daraja Team,
+
+I hope you are doing well.
+
+I am writing to request the Daraja Go Live form for my application. I have successfully completed the integration and testing on the Daraja sandbox environment and would now like to proceed with the go-live process for production access.
+
+Kindly share the Go Live form and any additional requirements or documentation needed to complete the process.
+
+Below are my details for reference:
+
+Business/Organization Name: [Your Business Name]
+App Name: [Your App Name]
+Short Code / Till Number: [Your Shortcode or Till Number]
+Registered Email: [Your Daraja Account Email]
+Phone Number: [Your Phone Number]
+
+Please let me know if any further information is required from my side.
+
+Thank you for your support.
+
+Kind regards,
+[Your Full Name]
+[Your Phone Number]
+[Your Email Address]
