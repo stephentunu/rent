@@ -3,8 +3,9 @@ const path = require("path");
 const fs = require("fs");
 require("dotenv").config();
 
+// On Railway: set DB_PATH=/data/renthub.db and attach a Volume at /data
 const DB_PATH = process.env.DB_PATH || "./data/renthub.db";
-const dir = path.dirname(DB_PATH);
+const dir = path.dirname(path.resolve(DB_PATH));
 if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
 const db = new Database(DB_PATH);
@@ -246,15 +247,11 @@ db.exec(`
   );
 `);
 
-// Add new columns to existing tables if they don't exist (for existing databases)
 const addColumnIfNotExists = (table, column, definition) => {
-  try {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-  } catch (e) { /* column already exists */ }
+  try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`); } catch {}
 };
 addColumnIfNotExists("properties", "view_count", "INTEGER DEFAULT 0");
 
-// Seed default data
 const { v4: uuidv4 } = require("uuid");
 
 function seedIfEmpty(table, rows) {
@@ -293,10 +290,10 @@ seedIfEmpty("commission_config", [
 ]);
 
 seedIfEmpty("subscription_plans", [
-  { id: uuidv4(), name: "Free",         price: 0,     duration_days: 36500, max_listings: 1,   features: JSON.stringify(["1 listing", "Basic visibility"]),                                      is_active: 1, created_at: now },
-  { id: uuidv4(), name: "Agent Basic",  price: 2500,  duration_days: 30,    max_listings: 10,  features: JSON.stringify(["10 listings", "Featured badge", "Priority support"]),                  is_active: 1, created_at: now },
-  { id: uuidv4(), name: "Agent Pro",    price: 5000,  duration_days: 30,    max_listings: 50,  features: JSON.stringify(["50 listings", "Featured badge", "Analytics", "Priority support"]),    is_active: 1, created_at: now },
-  { id: uuidv4(), name: "Agency",       price: 15000, duration_days: 30,    max_listings: 999, features: JSON.stringify(["Unlimited listings", "Top placement", "Analytics", "Dedicated support"]), is_active: 1, created_at: now },
+  { id: uuidv4(), name: "Free",        price: 0,     duration_days: 36500, max_listings: 1,   features: JSON.stringify(["1 listing", "Basic visibility"]),                                         is_active: 1, created_at: now },
+  { id: uuidv4(), name: "Agent Basic", price: 2500,  duration_days: 30,    max_listings: 10,  features: JSON.stringify(["10 listings", "Featured badge", "Priority support"]),                     is_active: 1, created_at: now },
+  { id: uuidv4(), name: "Agent Pro",   price: 5000,  duration_days: 30,    max_listings: 50,  features: JSON.stringify(["50 listings", "Featured badge", "Analytics", "Priority support"]),       is_active: 1, created_at: now },
+  { id: uuidv4(), name: "Agency",      price: 15000, duration_days: 30,    max_listings: 999, features: JSON.stringify(["Unlimited listings", "Top placement", "Analytics", "Dedicated support"]), is_active: 1, created_at: now },
 ]);
 
 console.log("Database initialized ✓");
