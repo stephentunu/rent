@@ -53,6 +53,27 @@ app.use("/api",               require("./routes/misc"));
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get("/api/health", (req, res) => res.json({ status: "ok", timestamp: new Date().toISOString(), version: "2.0.0" }));
 
+// ─── One-time Admin Promote ───────────────────────────────────────────────────
+// POST /api/setup/promote-admin  { secret, email }
+// Protected by ADMIN_SETUP_SECRET env var (set to any strong random string on Railway)
+app.post("/api/setup/promote-admin", (req, res) => {
+  const db = require("./db/init");
+  const { v4: uuidv4 } = require("uuid");
+  const secret = process.env.ADMIN_SETUP_SECRET || "renthub-setup-2024";
+  const { secret: provided, email } = req.body;
+  if (provided !== secret) return res.status(403).json({ message: "Invalid secret" });
+  if (!email) return res.status(400).json({ message: "Email required" });
+  const user = db.prepare("SELECT id FROM users WHERE email = ?").get(email.toLowerCase());
+  if (!user) return res.status(404).json({ message: "User not found" });
+  const roleRow = db.prepare("SELECT id, role FROM user_roles WHERE user_id = ?").get(user.id);
+  if (roleRow) {
+    db.prepare("UPDATE user_roles SET role = 'admin' WHERE user_id = ?").run(user.id);
+  } else {
+    db.prepare("INSERT INTO user_roles (id, user_id, role, created_at) VALUES (?,?,'admin',?)").run(uuidv4(), user.id, new Date().toISOString());
+  }
+  res.json({ message: `User ${email} promoted to admin successfully` });
+});
+
 // ─── 404 ──────────────────────────────────────────────────────────────────────
 app.use((req, res) => res.status(404).json({ message: `${req.method} ${req.path} not found` }));
 
