@@ -296,5 +296,39 @@ seedIfEmpty("subscription_plans", [
   { id: uuidv4(), name: "Agency",      price: 15000, duration_days: 30,    max_listings: 999, features: JSON.stringify(["Unlimited listings", "Top placement", "Analytics", "Dedicated support"]), is_active: 1, created_at: now },
 ]);
 
+// ─── Seed Admin User ─────────────────────────────────────────────────────────
+// Ensures an admin account always exists, even after Railway restarts.
+// Override via ADMIN_EMAIL and ADMIN_PASSWORD environment variables.
+(function seedAdmin() {
+  const bcrypt = require("bcryptjs");
+  const adminEmail = (process.env.ADMIN_EMAIL || "stephentunu09@gmail.com").toLowerCase();
+  const adminPassword = process.env.ADMIN_PASSWORD || "nashandsteve77";
+
+  const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(adminEmail);
+  if (!existing) {
+    const adminId = uuidv4();
+    const hash = bcrypt.hashSync(adminPassword, 10);
+    const ts = new Date().toISOString();
+    db.prepare("INSERT INTO users (id, email, password, full_name, is_verified, created_at, updated_at) VALUES (?,?,?,?,1,?,?)")
+      .run(adminId, adminEmail, hash, "Admin", ts, ts);
+    db.prepare("INSERT INTO user_roles (id, user_id, role, created_at) VALUES (?,?,'admin',?)")
+      .run(uuidv4(), adminId, ts);
+    db.prepare("INSERT INTO wallets (id, user_id, balance, locked_balance, created_at, updated_at) VALUES (?,?,0,0,?,?)")
+      .run(uuidv4(), adminId, ts, ts);
+    console.log("  ✓ Admin user seeded:", adminEmail);
+  } else {
+    // Ensure existing user has admin role
+    const roleRow = db.prepare("SELECT role FROM user_roles WHERE user_id = ?").get(existing.id);
+    if (!roleRow) {
+      db.prepare("INSERT INTO user_roles (id, user_id, role, created_at) VALUES (?,?,'admin',?)")
+        .run(uuidv4(), existing.id, new Date().toISOString());
+      console.log("  ✓ Admin role assigned to:", adminEmail);
+    } else if (roleRow.role !== "admin") {
+      db.prepare("UPDATE user_roles SET role = 'admin' WHERE user_id = ?").run(existing.id);
+      console.log("  ✓ Admin role updated for:", adminEmail);
+    }
+  }
+})();
+
 console.log("Database initialized ✓");
 module.exports = db;
