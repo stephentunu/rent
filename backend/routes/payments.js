@@ -52,7 +52,7 @@ router.post("/mpesa/stk-push", requireAuth, async (req, res) => {
 
     if (stkData.ResponseCode === "0") {
       const now = new Date().toISOString();
-      db.prepare("INSERT INTO payments (id,user_id,property_id,phone_number,amount,merchant_request_id,checkout_request_id,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,'pending',?,?)")
+      await db.prepare("INSERT INTO payments (id,user_id,property_id,phone_number,amount,merchant_request_id,checkout_request_id,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,'pending',?,?)")
         .run(uuidv4(), req.user.id, propertyId||null, phone, amount, stkData.MerchantRequestID, stkData.CheckoutRequestID, now, now);
       return res.json({ success: true, checkoutRequestId: stkData.CheckoutRequestID });
     }
@@ -64,7 +64,7 @@ router.post("/mpesa/stk-push", requireAuth, async (req, res) => {
 });
 
 // POST /api/payments/mpesa/callback
-router.post("/mpesa/callback", (req, res) => {
+router.post("/mpesa/callback", async (req, res) => {
   try {
     const body = req.body?.Body?.stkCallback;
     if (!body) return res.json({ ResultCode: 0, ResultDesc: "Accepted" });
@@ -74,20 +74,19 @@ router.post("/mpesa/callback", (req, res) => {
     if (ResultCode === 0 && CallbackMetadata?.Item) {
       const meta = {};
       CallbackMetadata.Item.forEach(item => { meta[item.Name] = item.Value; });
-      db.prepare("UPDATE payments SET status='completed',mpesa_receipt_number=?,transaction_date=?,result_code=?,result_desc=?,updated_at=? WHERE checkout_request_id=?")
+      await db.prepare("UPDATE payments SET status='completed',mpesa_receipt_number=?,transaction_date=?,result_code=?,result_desc=?,updated_at=? WHERE checkout_request_id=?")
         .run(meta.MpesaReceiptNumber||null, String(meta.TransactionDate||now), ResultCode, ResultDesc, now, CheckoutRequestID);
 
-      // Email + notification
-      const payment = db.prepare("SELECT * FROM payments WHERE checkout_request_id=?").get(CheckoutRequestID);
+      const payment = await db.prepare("SELECT * FROM payments WHERE checkout_request_id=?").get(CheckoutRequestID);
       if (payment?.user_id) {
-        const user = db.prepare("SELECT email, full_name FROM users WHERE id=?").get(payment.user_id);
-        const prop = payment.property_id ? db.prepare("SELECT title FROM properties WHERE id=?").get(payment.property_id) : null;
+        const user = await db.prepare("SELECT email, full_name FROM users WHERE id=?").get(payment.user_id);
+        const prop = payment.property_id ? await db.prepare("SELECT title FROM properties WHERE id=?").get(payment.property_id) : null;
         if (user) sendPaymentConfirmed(user.email, user.full_name, prop?.title || "Property", payment.amount, meta.MpesaReceiptNumber).catch(() => {});
-        db.prepare("INSERT INTO notifications (id,user_id,type,title,message,link,created_at) VALUES (?,?,?,?,?,?,?)")
+        await db.prepare("INSERT INTO notifications (id,user_id,type,title,message,link,created_at) VALUES (?,?,?,?,?,?,?)")
           .run(uuidv4(), payment.user_id, "payment_confirmed", "Payment Confirmed ✅", `KES ${Number(payment.amount).toLocaleString()} payment confirmed. Receipt: ${meta.MpesaReceiptNumber}`, "/dashboard", now);
       }
     } else {
-      db.prepare("UPDATE payments SET status='failed',result_code=?,result_desc=?,updated_at=? WHERE checkout_request_id=?")
+      await db.prepare("UPDATE payments SET status='failed',result_code=?,result_desc=?,updated_at=? WHERE checkout_request_id=?")
         .run(ResultCode, ResultDesc, now, CheckoutRequestID);
     }
   } catch (err) { console.error("M-Pesa callback error:", err.message); }
@@ -95,30 +94,28 @@ router.post("/mpesa/callback", (req, res) => {
 });
 
 // GET /api/payments
-router.get("/", requireAuth, (req, res) => {
+router.get("/", requireAuth, async (req, res) => {
   const rows = req.user.role === "admin"
-    ? db.prepare("SELECT * FROM payments ORDER BY created_at DESC").all()
-    : db.prepare("SELECT * FROM payments WHERE user_id=? ORDER BY created_at DESC").all(req.user.id);
+    ? await db.prepare("SELECT * FROM payments ORDER BY created_at DESC").all()
+    : await db.prepare("SELECT * FROM payments WHERE user_id=? ORDER BY created_at DESC").all(req.user.id);
   res.json(rows);
 });
 
-// GET /api/payments/subscription — subscribe to a plan
+// POST /api/payments/subscribe — subscribe to a plan
 router.post("/subscribe", requireAuth, async (req, res) => {
   const { plan_id, phone } = req.body;
   if (!plan_id || !phone) return res.status(400).json({ message: "plan_id and phone required" });
 
-  const plan = db.prepare("SELECT * FROM subscription_plans WHERE id=? AND is_active=1").get(plan_id);
+  const plan = await db.prepare("SELECT * FROM subscription_plans WHERE id=? AND is_active=1").get(plan_id);
   if (!plan) return res.status(404).json({ message: "Plan not found" });
   if (plan.price === 0) {
-    // Free plan — activate immediately
     const now = new Date().toISOString();
     const expires = new Date(Date.now() + plan.duration_days * 86400000).toISOString();
-    db.prepare("INSERT INTO subscriptions (id,user_id,plan_id,status,starts_at,expires_at,created_at) VALUES (?,?,?,'active',?,?,?)")
+    await db.prepare("INSERT INTO subscriptions (id,user_id,plan_id,status,starts_at,expires_at,created_at) VALUES (?,?,?,'active',?,?,?)")
       .run(uuidv4(), req.user.id, plan_id, now, expires, now);
     return res.json({ message: "Free plan activated" });
   }
 
-  // Trigger M-Pesa STK push for paid plans
   try {
     const token = await getMpesaToken();
     const { password, timestamp, shortcode } = getMpesaPassword();
@@ -138,7 +135,7 @@ router.post("/subscribe", requireAuth, async (req, res) => {
     if (data.ResponseCode === "0") {
       const now = new Date().toISOString();
       const paymentId = uuidv4();
-      db.prepare("INSERT INTO payments (id,user_id,property_id,phone_number,amount,merchant_request_id,checkout_request_id,status,created_at,updated_at) VALUES (?,?,null,?,?,?,?,'pending',?,?)")
+      await db.prepare("INSERT INTO payments (id,user_id,property_id,phone_number,amount,merchant_request_id,checkout_request_id,status,created_at,updated_at) VALUES (?,?,null,?,?,?,?,'pending',?,?)")
         .run(paymentId, req.user.id, phone, plan.price, data.MerchantRequestID, data.CheckoutRequestID, now, now);
       return res.json({ success: true, message: "Check your phone to complete payment" });
     }

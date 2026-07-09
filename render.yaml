@@ -1,0 +1,30 @@
+services:
+  # ─── Backend: Express API ────────────────────────────────────────────────────
+  - type: web
+    name: renthub-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: renthub-db
+          property: connectionString
+      # Set these manually in the Render dashboard after deploy:
+      # FRONTEND_URL   = https://your-app.vercel.app
+      # BASE_URL       = https://renthub-backend.onrender.com
+      # EMAIL_HOST, EMAIL_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_FROM
+      # CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET  (optional)
+      # MPESA_*  (optional)
+
+  # ─── PostgreSQL Database ─────────────────────────────────────────────────────
+databases:
+  - name: renthub-db
+    databaseName: renthub
+    user: renthub_user
+    plan: free

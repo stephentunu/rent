@@ -7,31 +7,31 @@ const { sendNewMessage } = require("../utils/email");
 const MESSAGE_LIMIT = 50; // Auto-clear after this many messages per conversation
 
 // ─── Helper: enrich conversation with participants, last message, unread ──────
-function enrichConversation(conv, userId) {
-  const participants = db.prepare(`
+async function enrichConversation(conv, userId) {
+  const participants = (await db.prepare(`
     SELECT cp.user_id, u.full_name, u.avatar_url
     FROM conversation_participants cp
     JOIN users u ON u.id = cp.user_id
     WHERE cp.conversation_id=? AND cp.user_id!=?
-  `).all(conv.id, userId).map(p => ({
+  `).all(conv.id, userId)).map(p => ({
     user_id: p.user_id,
     profile: { full_name: p.full_name, avatar_url: p.avatar_url },
   }));
 
-  const last_message = db.prepare(
+  const last_message = (await db.prepare(
     "SELECT content,created_at,sender_id FROM messages WHERE conversation_id=? ORDER BY created_at DESC LIMIT 1"
-  ).get(conv.id) || null;
+  ).get(conv.id)) || null;
 
-  const unread_count = db.prepare(
+  const unread_count = (await db.prepare(
     "SELECT COUNT(*) as c FROM messages WHERE conversation_id=? AND sender_id!=? AND is_read=0"
-  ).get(conv.id, userId).c;
+  ).get(conv.id, userId)).c;
 
-  const total_messages = db.prepare(
+  const total_messages = (await db.prepare(
     "SELECT COUNT(*) as c FROM messages WHERE conversation_id=?"
-  ).get(conv.id).c;
+  ).get(conv.id)).c;
 
-  const property = conv.property_id ? (() => {
-    const p = db.prepare("SELECT id,title,images FROM properties WHERE id=?").get(conv.property_id);
+  const property = conv.property_id ? await (async () => {
+    const p = await db.prepare("SELECT id,title,images FROM properties WHERE id=?").get(conv.property_id);
     if (p) { try { p.images = JSON.parse(p.images || "[]"); } catch { p.images = []; } }
     return p;
   })() : null;
@@ -40,17 +40,17 @@ function enrichConversation(conv, userId) {
 }
 
 // ─── Auto-clear: delete oldest messages once conversation exceeds the limit ───
-function autoCleanMessages(conversationId) {
-  const total = db.prepare(
+async function autoCleanMessages(conversationId) {
+  const total = (await db.prepare(
     "SELECT COUNT(*) as c FROM messages WHERE conversation_id=?"
-  ).get(conversationId).c;
+  ).get(conversationId)).c;
 
   if (total >= MESSAGE_LIMIT) {
     // Delete ALL messages in this conversation — it resets to empty
-    db.prepare("DELETE FROM messages WHERE conversation_id=?").run(conversationId);
+    await db.prepare("DELETE FROM messages WHERE conversation_id=?").run(conversationId);
 
     // Insert a system notice so users know what happened
-    db.prepare(
+    await db.prepare(
       "INSERT INTO messages (id,conversation_id,sender_id,content,is_read,created_at) VALUES (?,?,null,?,1,?)"
     ).run(
       uuidv4(),
@@ -66,39 +66,39 @@ function autoCleanMessages(conversationId) {
 }
 
 // ─── GET /api/conversations ───────────────────────────────────────────────────
-router.get("/", requireAuth, (req, res) => {
-  const convIds = db.prepare(
+router.get("/", requireAuth, async (req, res) => {
+  const convIds = (await db.prepare(
     "SELECT conversation_id FROM conversation_participants WHERE user_id=?"
-  ).all(req.user.id).map(r => r.conversation_id);
+  ).all(req.user.id)).map(r => r.conversation_id);
 
   if (!convIds.length) return res.json([]);
 
-  const rows = db.prepare(
+  const rows = await db.prepare(
     `SELECT * FROM conversations WHERE id IN (${convIds.map(() => "?").join(",")}) ORDER BY updated_at DESC`
   ).all(...convIds);
 
-  res.json(rows.map(c => enrichConversation(c, req.user.id)));
+  res.json(await Promise.all(rows.map(c => enrichConversation(c, req.user.id))));
 });
 
 // ─── GET /api/conversations/unread-count ──────────────────────────────────────
-router.get("/unread-count", requireAuth, (req, res) => {
-  const convIds = db.prepare(
+router.get("/unread-count", requireAuth, async (req, res) => {
+  const convIds = (await db.prepare(
     "SELECT conversation_id FROM conversation_participants WHERE user_id=?"
-  ).all(req.user.id).map(r => r.conversation_id);
+  ).all(req.user.id)).map(r => r.conversation_id);
 
   if (!convIds.length) return res.json({ count: 0 });
 
-  const count = db.prepare(
+  const count = (await db.prepare(
     `SELECT COUNT(*) as c FROM messages
      WHERE conversation_id IN (${convIds.map(() => "?").join(",")})
      AND sender_id!=? AND is_read=0`
-  ).get(...convIds, req.user.id).c;
+  ).get(...convIds, req.user.id)).c;
 
   res.json({ count });
 });
 
 // ─── POST /api/conversations ──────────────────────────────────────────────────
-router.post("/", requireAuth, (req, res) => {
+router.post("/", requireAuth, async (req, res) => {
   const { property_id, owner_id } = req.body;
   if (!owner_id) return res.status(400).json({ message: "owner_id required" });
   if (owner_id === req.user.id) return res.status(400).json({ message: "Cannot message yourself" });
@@ -107,7 +107,7 @@ router.post("/", requireAuth, (req, res) => {
 
   // Return existing conversation if one already exists
   if (realPropertyId) {
-    const existing = db.prepare(`
+    const existing = await db.prepare(`
       SELECT c.id FROM conversations c
       JOIN conversation_participants cp1 ON cp1.conversation_id=c.id AND cp1.user_id=?
       JOIN conversation_participants cp2 ON cp2.conversation_id=c.id AND cp2.user_id=?
@@ -115,14 +115,12 @@ router.post("/", requireAuth, (req, res) => {
     `).get(req.user.id, owner_id, realPropertyId);
 
     if (existing) {
-      return res.json(enrichConversation(
-        db.prepare("SELECT * FROM conversations WHERE id=?").get(existing.id),
-        req.user.id
-      ));
+      const conv = await db.prepare("SELECT * FROM conversations WHERE id=?").get(existing.id);
+      return res.json(await enrichConversation(conv, req.user.id));
     }
   } else {
     // For general conversations, check if a non-property conversation already exists
-    const existing = db.prepare(`
+    const existing = await db.prepare(`
       SELECT c.id FROM conversations c
       JOIN conversation_participants cp1 ON cp1.conversation_id=c.id AND cp1.user_id=?
       JOIN conversation_participants cp2 ON cp2.conversation_id=c.id AND cp2.user_id=?
@@ -130,37 +128,33 @@ router.post("/", requireAuth, (req, res) => {
     `).get(req.user.id, owner_id);
 
     if (existing) {
-      return res.json(enrichConversation(
-        db.prepare("SELECT * FROM conversations WHERE id=?").get(existing.id),
-        req.user.id
-      ));
+      const conv = await db.prepare("SELECT * FROM conversations WHERE id=?").get(existing.id);
+      return res.json(await enrichConversation(conv, req.user.id));
     }
   }
 
   // Create new conversation
   const id = uuidv4();
   const now = new Date().toISOString();
-  db.prepare("INSERT INTO conversations (id,property_id,created_at,updated_at) VALUES (?,?,?,?)")
+  await db.prepare("INSERT INTO conversations (id,property_id,created_at,updated_at) VALUES (?,?,?,?)")
     .run(id, realPropertyId, now, now);
-  db.prepare("INSERT INTO conversation_participants (id,conversation_id,user_id) VALUES (?,?,?)")
+  await db.prepare("INSERT INTO conversation_participants (id,conversation_id,user_id) VALUES (?,?,?)")
     .run(uuidv4(), id, req.user.id);
-  db.prepare("INSERT INTO conversation_participants (id,conversation_id,user_id) VALUES (?,?,?)")
+  await db.prepare("INSERT INTO conversation_participants (id,conversation_id,user_id) VALUES (?,?,?)")
     .run(uuidv4(), id, owner_id);
 
-  res.status(201).json(enrichConversation(
-    db.prepare("SELECT * FROM conversations WHERE id=?").get(id),
-    req.user.id
-  ));
+  const conv = await db.prepare("SELECT * FROM conversations WHERE id=?").get(id);
+  res.status(201).json(await enrichConversation(conv, req.user.id));
 });
 
 // ─── GET /api/conversations/:id/messages ─────────────────────────────────────
-router.get("/:id/messages", requireAuth, (req, res) => {
-  const participant = db.prepare(
+router.get("/:id/messages", requireAuth, async (req, res) => {
+  const participant = await db.prepare(
     "SELECT id FROM conversation_participants WHERE conversation_id=? AND user_id=?"
   ).get(req.params.id, req.user.id);
   if (!participant) return res.status(403).json({ message: "Not a participant" });
 
-  const messages = db.prepare(`
+  const messages = await db.prepare(`
     SELECT m.*, u.full_name, u.avatar_url
     FROM messages m
     LEFT JOIN users u ON u.id = m.sender_id
@@ -168,8 +162,6 @@ router.get("/:id/messages", requireAuth, (req, res) => {
     ORDER BY m.created_at ASC
   `).all(req.params.id);
 
-  // Also return how many messages are in this conversation so the frontend
-  // can warn the user how close they are to the 50-message limit
   const total = messages.length;
 
   res.json({
@@ -193,36 +185,35 @@ router.post("/:id/messages", requireAuth, async (req, res) => {
   const { content } = req.body;
   if (!content?.trim()) return res.status(400).json({ message: "content required" });
 
-  const participant = db.prepare(
+  const participant = await db.prepare(
     "SELECT id FROM conversation_participants WHERE conversation_id=? AND user_id=?"
   ).get(req.params.id, req.user.id);
   if (!participant) return res.status(403).json({ message: "Not a participant" });
 
   // ── Auto-clean BEFORE inserting the new message ───────────────────────────
-  // Check current count. If we're AT the limit, clear first then allow new message.
-  autoCleanMessages(req.params.id);
+  await autoCleanMessages(req.params.id);
 
   const msgId = uuidv4();
   const now   = new Date().toISOString();
 
-  db.prepare(
+  await db.prepare(
     "INSERT INTO messages (id,conversation_id,sender_id,content,is_read,created_at) VALUES (?,?,?,?,0,?)"
   ).run(msgId, req.params.id, req.user.id, content.trim(), now);
 
-  db.prepare("UPDATE conversations SET updated_at=? WHERE id=?").run(now, req.params.id);
+  await db.prepare("UPDATE conversations SET updated_at=? WHERE id=?").run(now, req.params.id);
 
   // ── Notify the other participant ──────────────────────────────────────────
-  const other = db.prepare(`
+  const other = await db.prepare(`
     SELECT cp.user_id, u.email, u.full_name
     FROM conversation_participants cp
     JOIN users u ON u.id = cp.user_id
     WHERE cp.conversation_id=? AND cp.user_id!=?
   `).get(req.params.id, req.user.id);
 
-  const sender = db.prepare("SELECT full_name FROM users WHERE id=?").get(req.user.id);
-  const conv   = db.prepare("SELECT property_id FROM conversations WHERE id=?").get(req.params.id);
+  const sender = await db.prepare("SELECT full_name FROM users WHERE id=?").get(req.user.id);
+  const conv   = await db.prepare("SELECT property_id FROM conversations WHERE id=?").get(req.params.id);
   const prop   = conv?.property_id
-    ? db.prepare("SELECT title FROM properties WHERE id=?").get(conv.property_id)
+    ? await db.prepare("SELECT title FROM properties WHERE id=?").get(conv.property_id)
     : null;
 
   if (other?.user_id) {
@@ -234,7 +225,7 @@ router.post("/:id/messages", requireAuth, async (req, res) => {
     ).catch(() => {});
 
     try {
-      db.prepare(
+      await db.prepare(
         "INSERT INTO notifications (id,user_id,type,title,message,link,created_at) VALUES (?,?,?,?,?,?,?)"
       ).run(
         uuidv4(),
@@ -250,13 +241,13 @@ router.post("/:id/messages", requireAuth, async (req, res) => {
     }
   }
 
-  // Return the new message along with updated counts
-  const total = db.prepare(
+  const total = (await db.prepare(
     "SELECT COUNT(*) as c FROM messages WHERE conversation_id=?"
-  ).get(req.params.id).c;
+  ).get(req.params.id)).c;
 
+  const msgRow = await db.prepare("SELECT * FROM messages WHERE id=?").get(msgId);
   res.status(201).json({
-    message: db.prepare("SELECT * FROM messages WHERE id=?").get(msgId),
+    message: msgRow,
     total,
     limit: MESSAGE_LIMIT,
     remaining: Math.max(0, MESSAGE_LIMIT - total),
@@ -264,8 +255,8 @@ router.post("/:id/messages", requireAuth, async (req, res) => {
 });
 
 // ─── PUT /api/conversations/:id/read ─────────────────────────────────────────
-router.put("/:id/read", requireAuth, (req, res) => {
-  db.prepare(
+router.put("/:id/read", requireAuth, async (req, res) => {
+  await db.prepare(
     "UPDATE messages SET is_read=1 WHERE conversation_id=? AND sender_id!=? AND is_read=0"
   ).run(req.params.id, req.user.id);
   res.status(204).send();
