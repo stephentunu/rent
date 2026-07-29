@@ -28,8 +28,15 @@ export function Footer() {
               <Button size="icon" variant="ghost" className="h-9 w-9 hover:bg-background/10">
                 <Twitter className="h-4 w-4" />
               </Button>
-              <Button size="icon" variant="ghost" className="h-9 w-9 hover:bg-background/10">
-                <Instagram className="h-4 w-4" />
+              <Button size="icon" variant="ghost" className="h-9 w-9 hover:bg-background/10" asChild>
+                <a 
+                  href="https://www.instagram.com/rentin.ke" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  aria-label="Instagram: Rentin.ke"
+                >
+                  <Instagram className="h-4 w-4" />
+                </a>
               </Button>
               <Button size="icon" variant="ghost" className="h-9 w-9 hover:bg-background/10">
                 <Linkedin className="h-4 w-4" />
