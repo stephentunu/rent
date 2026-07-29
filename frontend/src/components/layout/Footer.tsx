@@ -108,11 +108,11 @@ export function Footer() {
             <div className="pt-4 space-y-2 text-sm text-background/70">
               <div className="flex items-center gap-2">
                 <Phone className="h-4 w-4" />
-                <span>+254 700 000 000</span>
+                <span>+254794549238</span>
               </div>
               <div className="flex items-center gap-2">
                 <Mail className="h-4 w-4" />
-                <span>info@nestfinder.ke</span>
+                <span>rentin.ke@gmail.com</span>
               </div>
               <div className="flex items-center gap-2">
                 <MapPin className="h-4 w-4" />
