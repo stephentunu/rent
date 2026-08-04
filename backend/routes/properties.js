@@ -54,7 +54,7 @@ router.get("/mine", requireAuth, async (req, res) => {
 });
 
 // GET /api/properties/:id
-router.get("//:id", optionalAuth, async (req, res) => {
+router.get("/:id", optionalAuth, async (req, res) => {
   const row = await db.prepare("SELECT * FROM properties WHERE id = ?").get(req.params.id);
   if (!row) return res.status(404).json({ message: "Property not found" });
 
