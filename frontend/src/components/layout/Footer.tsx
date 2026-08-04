@@ -22,8 +22,15 @@ export function Footer() {
               Whether you're buying, renting, or selling, we're here to help.
             </p>
             <div className="flex gap-3">
-              <Button size="icon" variant="ghost" className="h-9 w-9 hover:bg-background/10">
-                <Facebook className="h-4 w-4" />
+              <Button size="icon" variant="ghost" className="h-9 w-9 hover:bg-background/10" asChild>
+                <a 
+                  href="https://www.facebook.com/RentInke" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  aria-label="Facebook: Rent Inke"
+                >
+                  <Facebook className="h-4 w-4" />
+                </a>
               </Button>
               <Button size="icon" variant="ghost" className="h-9 w-9 hover:bg-background/10" asChild>
                 <a 
